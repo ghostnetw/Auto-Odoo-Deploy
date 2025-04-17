@@ -1,5 +1,5 @@
 #!/bin/bash
-# Odoo Community Edition Automated Installation Script for Debian 12 (Bookworm)
+# Odoo Enterprise Automated Installation Script for Debian 12 (Bookworm)
 
 # Exit script on any error
 set -e
@@ -31,7 +31,7 @@ print_warning() {
 
 # Collect necessary information
 read -p "Enter Odoo database name: " ODOO_DB
-read -p "Enter Odoo admin username: " ODOO_USER
+read -p "Enter Odoo admin email: " ODOO_USER_EMAIL
 read -s -p "Enter password for Odoo admin user: " ODOO_PWD
 echo ""
 read -p "Enter Odoo version to install (e.g., 17.0): " ODOO_VERSION
@@ -101,6 +101,10 @@ else
     git clone https://github.com/odoo/odoo.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server
 fi
 
+# Optional: Create custom addons directory
+print_status "Creating custom addons directory..."
+mkdir -p /opt/odoo/custom-addons
+
 # Set permissions
 chown -R odoo:odoo /opt/odoo
 
@@ -118,19 +122,21 @@ print_status "Creating log directory..."
 mkdir -p /var/log/odoo
 chown -R odoo:odoo /var/log/odoo
 
+# Generate a secure admin password
+ADMIN_PASSWORD=$ODOO_PWD
+
 # Create Odoo configuration file
 print_status "Creating Odoo configuration file..."
 mkdir -p /etc/odoo
 cat > /etc/odoo/odoo.conf << EOF
 [options]
 ; General Configuration
-admin_passwd = $ODOO_PWD
+admin_passwd = $ADMIN_PASSWORD
 db_host = False
 db_port = False
 db_user = odoo
 db_password = False
-db_name = $ODOO_DB
-addons_path = /opt/odoo/odoo-server/addons
+addons_path = /opt/odoo/odoo-server/addons,/opt/odoo/custom-addons
 xmlrpc_port = 8069
 proxy_mode = True
 logfile = /var/log/odoo/odoo-server.log
@@ -170,23 +176,16 @@ systemctl daemon-reload
 systemctl enable odoo.service
 systemctl start odoo.service
 
-# Create the database
-print_status "Creating Odoo database..."
-su - odoo -c "/opt/odoo/odoo-venv/bin/python3 /opt/odoo/odoo-server/odoo-bin -c /etc/odoo/odoo.conf -d $ODOO_DB -i base --stop-after-init"
-
-# Configure firewall if it's active
-if systemctl is-active --quiet ufw; then
-    print_status "Configuring firewall..."
-    ufw allow 8069/tcp
-    ufw reload
-fi
-
 # Check if the service is running properly
 if systemctl is-active --quiet odoo.service; then
     print_status "Odoo is now installed and running!"
     print_status "You can access Odoo at http://YOUR_SERVER_IP:8069"
-    print_status "Database name: $ODOO_DB"
-    print_status "Username: $ODOO_USER (email format)"
+    print_status "To create your first database:"
+    print_status "1. Go to http://YOUR_SERVER_IP:8069"
+    print_status "2. Fill in database name: $ODOO_DB"
+    print_status "3. Email: $ODOO_USER_EMAIL"
+    print_status "4. Password: (the one you entered)"
+    print_status "5. Master password: $ADMIN_PASSWORD"
 else
     print_error "Odoo service failed to start. Check logs for details: journalctl -u odoo.service"
 fi
