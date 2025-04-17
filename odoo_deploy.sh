@@ -1,6 +1,5 @@
 #!/bin/bash
-# Odoo Enterprise Automated Installation Script for Debian 12 (Bookworm)
-# This script requires Odoo Enterprise access credentials
+# Odoo Community Edition Automated Installation Script for Debian 12 (Bookworm)
 
 # Exit script on any error
 set -e
@@ -31,12 +30,9 @@ print_warning() {
 }
 
 # Collect necessary information
-read -p "Enter Odoo Enterprise database name: " ODOO_DB
-read -p "Enter Odoo Enterprise username: " ODOO_USER
-read -s -p "Enter password for Odoo Enterprise user: " ODOO_PWD
-echo ""
-read -p "Enter GitHub username: " GITHUB_USER
-read -s -p "Enter GitHub personal access token (with repo scope): " GITHUB_TOKEN
+read -p "Enter Odoo database name: " ODOO_DB
+read -p "Enter Odoo admin username: " ODOO_USER
+read -s -p "Enter password for Odoo admin user: " ODOO_PWD
 echo ""
 read -p "Enter Odoo version to install (e.g., 17.0): " ODOO_VERSION
 
@@ -66,7 +62,7 @@ WKHTML_LATEST_URL=$(curl -s https://api.github.com/repos/wkhtmltopdf/packaging/r
 
 if [ -z "$WKHTML_LATEST_URL" ]; then
     print_warning "Could not determine latest wkhtmltopdf version for Debian Bookworm, falling back to known version"
-    WKHTML_LATEST_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.bookworm_amd64.deb"
+    WKHTML_LATEST_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_amd64.deb"
 fi
 
 print_status "Downloading wkhtmltopdf from $WKHTML_LATEST_URL"
@@ -92,21 +88,17 @@ fi
 print_status "Creating PostgreSQL user..."
 su - postgres -c "createuser -s odoo" || echo "PostgreSQL user already exists"
 
-# Clone Odoo from Enterprise repo using GitHub token authentication
-print_status "Cloning Odoo Enterprise repository..."
+# Clone Odoo from Community GitHub repo
+print_status "Cloning Odoo Community repository..."
 cd /opt
 if [ -d "/opt/odoo/odoo-server" ]; then
-    print_warning "Odoo directory already exists. Skipping clone."
+    print_warning "Odoo directory already exists. Checking for updates..."
+    cd /opt/odoo/odoo-server
+    git pull origin $ODOO_VERSION
 else
     mkdir -p /opt/odoo
     cd /opt/odoo
-    
-    # Use token authentication for GitHub
-    print_status "Cloning Enterprise repository with token authentication..."
-    git clone https://$GITHUB_USER:$GITHUB_TOKEN@github.com/odoo/enterprise.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server
-    
-    print_status "Cloning Community repository..."
-    git clone https://github.com/odoo/odoo.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server/odoo
+    git clone https://github.com/odoo/odoo.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server
 fi
 
 # Set permissions
@@ -118,7 +110,7 @@ cd /opt/odoo
 python3 -m venv odoo-venv
 source odoo-venv/bin/activate
 pip3 install wheel
-pip3 install -r /opt/odoo/odoo-server/odoo/requirements.txt
+pip3 install -r /opt/odoo/odoo-server/requirements.txt
 deactivate
 
 # Create log directory
@@ -138,7 +130,7 @@ db_port = False
 db_user = odoo
 db_password = False
 db_name = $ODOO_DB
-addons_path = /opt/odoo/odoo-server/odoo/addons,/opt/odoo/odoo-server/addons
+addons_path = /opt/odoo/odoo-server/addons
 xmlrpc_port = 8069
 proxy_mode = True
 logfile = /var/log/odoo/odoo-server.log
@@ -154,7 +146,7 @@ chmod 640 /etc/odoo/odoo.conf
 print_status "Creating systemd service..."
 cat > /etc/systemd/system/odoo.service << EOF
 [Unit]
-Description=Odoo Enterprise
+Description=Odoo
 Requires=postgresql.service
 After=network.target postgresql.service
 
@@ -164,7 +156,7 @@ SyslogIdentifier=odoo
 PermissionsStartOnly=true
 User=odoo
 Group=odoo
-ExecStart=/opt/odoo/odoo-venv/bin/python3 /opt/odoo/odoo-server/odoo/odoo-bin -c /etc/odoo/odoo.conf
+ExecStart=/opt/odoo/odoo-venv/bin/python3 /opt/odoo/odoo-server/odoo-bin -c /etc/odoo/odoo.conf
 StandardOutput=journal+console
 Environment=PATH=/opt/odoo/odoo-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -180,7 +172,7 @@ systemctl start odoo.service
 
 # Create the database
 print_status "Creating Odoo database..."
-su - odoo -c "/opt/odoo/odoo-venv/bin/python3 /opt/odoo/odoo-server/odoo/odoo-bin -c /etc/odoo/odoo.conf -d $ODOO_DB -i base --stop-after-init"
+su - odoo -c "/opt/odoo/odoo-venv/bin/python3 /opt/odoo/odoo-server/odoo-bin -c /etc/odoo/odoo.conf -d $ODOO_DB -i base --stop-after-init"
 
 # Configure firewall if it's active
 if systemctl is-active --quiet ufw; then
@@ -191,7 +183,7 @@ fi
 
 # Check if the service is running properly
 if systemctl is-active --quiet odoo.service; then
-    print_status "Odoo Enterprise is now installed and running!"
+    print_status "Odoo is now installed and running!"
     print_status "You can access Odoo at http://YOUR_SERVER_IP:8069"
     print_status "Database name: $ODOO_DB"
     print_status "Username: $ODOO_USER (email format)"
