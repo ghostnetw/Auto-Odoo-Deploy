@@ -35,8 +35,8 @@ read -p "Enter Odoo Enterprise database name: " ODOO_DB
 read -p "Enter Odoo Enterprise username: " ODOO_USER
 read -s -p "Enter password for Odoo Enterprise user: " ODOO_PWD
 echo ""
-read -p "Enter Odoo Enterprise repository username: " ODOO_REPO_USER
-read -s -p "Enter Odoo Enterprise repository password: " ODOO_REPO_PWD
+read -p "Enter GitHub username: " GITHUB_USER
+read -s -p "Enter GitHub personal access token (with repo scope): " GITHUB_TOKEN
 echo ""
 read -p "Enter Odoo version to install (e.g., 17.0): " ODOO_VERSION
 
@@ -92,7 +92,7 @@ fi
 print_status "Creating PostgreSQL user..."
 su - postgres -c "createuser -s odoo" || echo "PostgreSQL user already exists"
 
-# Clone Odoo from Enterprise repo
+# Clone Odoo from Enterprise repo using GitHub token authentication
 print_status "Cloning Odoo Enterprise repository..."
 cd /opt
 if [ -d "/opt/odoo/odoo-server" ]; then
@@ -100,7 +100,12 @@ if [ -d "/opt/odoo/odoo-server" ]; then
 else
     mkdir -p /opt/odoo
     cd /opt/odoo
-    git clone https://$ODOO_REPO_USER:$ODOO_REPO_PWD@github.com/odoo/enterprise.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server
+    
+    # Use token authentication for GitHub
+    print_status "Cloning Enterprise repository with token authentication..."
+    git clone https://$GITHUB_USER:$GITHUB_TOKEN@github.com/odoo/enterprise.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server
+    
+    print_status "Cloning Community repository..."
     git clone https://github.com/odoo/odoo.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server/odoo
 fi
 
