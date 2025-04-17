@@ -1,130 +1,155 @@
 #!/bin/bash
-# Script de Auto Despliegue de Odoo 18 para Debian 12
-# ------------------------------------------------------
+# Odoo Enterprise Automated Installation Script for Debian 12 (Bookworm)
+# This script requires Odoo Enterprise access credentials
 
-# Colores para mejorar la legibilidad
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Exit script on any error
+set -e
 
-# Función para mostrar mensajes
-function log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
-}
-
-# Función para mensajes de advertencia
-function warning() {
-    echo -e "${YELLOW}[ADVERTENCIA]${NC} $1"
-}
-
-# Comprobar si se ejecuta como root
+# Script must be run as root
 if [[ $EUID -ne 0 ]]; then
-   echo "Este script debe ser ejecutado como root" 
+   echo "This script must be run as root" 
    exit 1
 fi
 
-# Variables de configuración
-ODOO_USER="odoo"
-ODOO_DIR="/opt/odoo"
-ODOO_LOG_DIR="/var/log/odoo"
-ODOO_CONFIG_DIR="/etc/odoo"
-ODOO_VERSION="18.0"
-ODOO_SUPERADMIN="admin"
-PG_VERSION="15"
-PG_USER="odoo"
-PG_PASSWORD="$(openssl rand -base64 12)"
+# Color codes for better readability
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
 
-log "Iniciando instalación de Odoo 18 en Debian 12..."
+# Function for printing status messages
+print_status() {
+    echo -e "${GREEN}[+] $1${NC}"
+}
 
-# Actualizar el sistema
-log "Actualizando sistema..."
-apt-get update && apt-get upgrade -y
+print_error() {
+    echo -e "${RED}[!] $1${NC}"
+}
 
-# Instalar dependencias
-log "Instalando dependencias..."
-apt-get install -y git wget python3 python3-pip python3-dev python3-venv \
-    python3-wheel libxml2-dev libxslt1-dev libldap2-dev libsasl2-dev \
-    libssl-dev libpq-dev libjpeg-dev zlib1g-dev libfreetype6-dev \
-    fonts-liberation2 libfontconfig1 libjpeg62-turbo libx11-6 libxext6 \
-    libxrender1 xfonts-75dpi xfonts-base libnss3-dev nodejs npm
+print_warning() {
+    echo -e "${YELLOW}[!] $1${NC}"
+}
 
-# Instalar wkhtmltopdf para reportes PDF
-log "Instalando wkhtmltopdf..."
-wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.bullseye_amd64.deb
-dpkg -i wkhtmltox_0.12.6.1-2.bullseye_amd64.deb
-apt-get install -f -y
-rm wkhtmltox_0.12.6.1-2.bullseye_amd64.deb
+# Collect necessary information
+read -p "Enter Odoo Enterprise database name: " ODOO_DB
+read -p "Enter Odoo Enterprise username: " ODOO_USER
+read -s -p "Enter password for Odoo Enterprise user: " ODOO_PWD
+echo ""
+read -p "Enter Odoo Enterprise repository username: " ODOO_REPO_USER
+read -s -p "Enter Odoo Enterprise repository password: " ODOO_REPO_PWD
+echo ""
+read -p "Enter Odoo version to install (e.g., 17.0): " ODOO_VERSION
 
-# Instalar PostgreSQL
-log "Instalando PostgreSQL $PG_VERSION..."
-apt-get install -y postgresql-$PG_VERSION
+# Update system
+print_status "Updating system packages..."
+apt update && apt upgrade -y
 
-# Configurar usuario de PostgreSQL
-log "Configurando PostgreSQL para Odoo..."
-su - postgres -c "createuser -s $PG_USER"
-su - postgres -c "psql -c \"ALTER USER $PG_USER WITH PASSWORD '$PG_PASSWORD';\""
+# Install dependencies
+print_status "Installing dependencies..."
+apt install -y git python3-pip build-essential wget python3-dev python3-venv \
+    python3-wheel libfreetype6-dev libxml2-dev libzip-dev libldap2-dev \
+    libsasl2-dev python3-setuptools node-less libjpeg-dev zlib1g-dev libpq-dev \
+    libxslt1-dev libldap2-dev libtiff5-dev libopenjp2-7-dev liblcms2-dev \
+    libwebp-dev libharfbuzz-dev libfribidi-dev libxcb1-dev
 
-# Crear usuario del sistema para Odoo
-log "Creando usuario del sistema para Odoo..."
-useradd -m -d $ODOO_DIR -U -r -s /bin/bash $ODOO_USER
+# Install PostgreSQL
+print_status "Installing PostgreSQL..."
+apt install -y postgresql postgresql-client
 
-# Crear directorios necesarios
-log "Configurando directorios para Odoo..."
-mkdir -p $ODOO_CONFIG_DIR $ODOO_LOG_DIR
-chown $ODOO_USER:$ODOO_USER $ODOO_CONFIG_DIR $ODOO_LOG_DIR
+# Install latest wkhtmltopdf for reports
+print_status "Installing latest wkhtmltopdf..."
+apt install -y xfonts-75dpi xfonts-base fontconfig libxrender1 libjpeg62-turbo xfonts-encodings
 
-# Descargar Odoo
-log "Descargando Odoo $ODOO_VERSION..."
-su - $ODOO_USER -c "git clone --depth 1 --branch $ODOO_VERSION https://www.github.com/odoo/odoo $ODOO_DIR/odoo"
+# Get latest wkhtmltopdf release information from GitHub API
+print_status "Fetching latest wkhtmltopdf version..."
+WKHTML_LATEST_URL=$(curl -s https://api.github.com/repos/wkhtmltopdf/packaging/releases/latest | grep "browser_download_url.*bookworm_amd64.deb" | cut -d : -f 2,3 | tr -d \")
 
-# Crear entorno virtual de Python
-log "Configurando entorno virtual de Python..."
-su - $ODOO_USER -c "python3 -m venv $ODOO_DIR/venv"
-su - $ODOO_USER -c "$ODOO_DIR/venv/bin/pip install --upgrade pip"
-su - $ODOO_USER -c "$ODOO_DIR/venv/bin/pip install wheel"
-su - $ODOO_USER -c "cd $ODOO_DIR/odoo && $ODOO_DIR/venv/bin/pip install -r requirements.txt"
+if [ -z "$WKHTML_LATEST_URL" ]; then
+    print_warning "Could not determine latest wkhtmltopdf version for Debian Bookworm, falling back to known version"
+    WKHTML_LATEST_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.bookworm_amd64.deb"
+fi
 
-# Configurar archivo de configuración de Odoo
-log "Creando archivo de configuración para Odoo..."
-cat > $ODOO_CONFIG_DIR/odoo.conf << EOF
+print_status "Downloading wkhtmltopdf from $WKHTML_LATEST_URL"
+cd /tmp
+wget -q $WKHTML_LATEST_URL -O wkhtmltox.deb
+dpkg -i wkhtmltox.deb || { apt -f install -y && dpkg -i wkhtmltox.deb; }
+
+# Verify installation
+if command -v wkhtmltopdf >/dev/null 2>&1; then
+    print_status "wkhtmltopdf installed successfully: $(wkhtmltopdf --version)"
+else
+    print_error "wkhtmltopdf installation failed"
+    exit 1
+fi
+
+# Create odoo user if it doesn't exist
+print_status "Creating odoo user..."
+if ! id "odoo" &>/dev/null; then
+    adduser --system --home=/opt/odoo --group odoo
+fi
+
+# Create PostgreSQL user for Odoo
+print_status "Creating PostgreSQL user..."
+su - postgres -c "createuser -s odoo" || echo "PostgreSQL user already exists"
+
+# Clone Odoo from Enterprise repo
+print_status "Cloning Odoo Enterprise repository..."
+cd /opt
+if [ -d "/opt/odoo/odoo-server" ]; then
+    print_warning "Odoo directory already exists. Skipping clone."
+else
+    mkdir -p /opt/odoo
+    cd /opt/odoo
+    git clone https://$ODOO_REPO_USER:$ODOO_REPO_PWD@github.com/odoo/enterprise.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server
+    git clone https://github.com/odoo/odoo.git --depth 1 --branch $ODOO_VERSION --single-branch odoo-server/odoo
+fi
+
+# Set permissions
+chown -R odoo:odoo /opt/odoo
+
+# Create virtual environment and install requirements
+print_status "Setting up Python virtual environment..."
+cd /opt/odoo
+python3 -m venv odoo-venv
+source odoo-venv/bin/activate
+pip3 install wheel
+pip3 install -r /opt/odoo/odoo-server/odoo/requirements.txt
+deactivate
+
+# Create log directory
+print_status "Creating log directory..."
+mkdir -p /var/log/odoo
+chown -R odoo:odoo /var/log/odoo
+
+# Create Odoo configuration file
+print_status "Creating Odoo configuration file..."
+mkdir -p /etc/odoo
+cat > /etc/odoo/odoo.conf << EOF
 [options]
-; General options
-admin_passwd = $ODOO_SUPERADMIN
+; General Configuration
+admin_passwd = $ODOO_PWD
 db_host = False
 db_port = False
-db_user = $PG_USER
-db_password = $PG_PASSWORD
-dbfilter = 
-addons_path = $ODOO_DIR/odoo/addons
-logfile = $ODOO_LOG_DIR/odoo.log
-logrotate = True
-log_level = info
+db_user = odoo
+db_password = False
+db_name = $ODOO_DB
+addons_path = /opt/odoo/odoo-server/odoo/addons,/opt/odoo/odoo-server/addons
 xmlrpc_port = 8069
 proxy_mode = True
-workers = 4
-max_cron_threads = 2
-limit_memory_hard = 2684354560
-limit_memory_soft = 2147483648
-limit_request = 8192
-limit_time_cpu = 600
-limit_time_real = 1200
-data_dir = $ODOO_DIR/data
-longpolling_port = 8072
+logfile = /var/log/odoo/odoo-server.log
+logrotate = True
+log_level = info
 EOF
 
-# Ajustar permisos
-chown $ODOO_USER:$ODOO_USER $ODOO_CONFIG_DIR/odoo.conf
-chmod 640 $ODOO_CONFIG_DIR/odoo.conf
+# Adjust ownership of the configuration file
+chown odoo:odoo /etc/odoo/odoo.conf
+chmod 640 /etc/odoo/odoo.conf
 
-# Crear directorio para datos
-mkdir -p $ODOO_DIR/data
-chown $ODOO_USER:$ODOO_USER $ODOO_DIR/data
-
-# Crear servicio systemd
-log "Configurando servicio systemd para Odoo..."
+# Create systemd service file
+print_status "Creating systemd service..."
 cat > /etc/systemd/system/odoo.service << EOF
 [Unit]
-Description=Odoo 18
+Description=Odoo Enterprise
 Requires=postgresql.service
 After=network.target postgresql.service
 
@@ -132,57 +157,51 @@ After=network.target postgresql.service
 Type=simple
 SyslogIdentifier=odoo
 PermissionsStartOnly=true
-User=$ODOO_USER
-Group=$ODOO_USER
-ExecStart=$ODOO_DIR/venv/bin/python3 $ODOO_DIR/odoo/odoo-bin -c $ODOO_CONFIG_DIR/odoo.conf
+User=odoo
+Group=odoo
+ExecStart=/opt/odoo/odoo-venv/bin/python3 /opt/odoo/odoo-server/odoo/odoo-bin -c /etc/odoo/odoo.conf
 StandardOutput=journal+console
-Restart=always
-RestartSec=5
+Environment=PATH=/opt/odoo/odoo-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Habilitar e iniciar el servicio
-log "Habilitando e iniciando servicio de Odoo..."
+# Reload systemd and enable Odoo service
+print_status "Enabling Odoo service..."
 systemctl daemon-reload
-systemctl enable odoo
-systemctl start odoo
+systemctl enable odoo.service
+systemctl start odoo.service
 
-# Configurar reglas de firewall (si está instalado)
-if command -v ufw &> /dev/null; then
-    log "Configurando firewall..."
+# Create the database
+print_status "Creating Odoo database..."
+su - odoo -c "/opt/odoo/odoo-venv/bin/python3 /opt/odoo/odoo-server/odoo/odoo-bin -c /etc/odoo/odoo.conf -d $ODOO_DB -i base --stop-after-init"
+
+# Configure firewall if it's active
+if systemctl is-active --quiet ufw; then
+    print_status "Configuring firewall..."
     ufw allow 8069/tcp
-    ufw allow 8072/tcp
+    ufw reload
 fi
 
-# Configuración de logrotate para los logs de Odoo
-log "Configurando rotación de logs..."
-cat > /etc/logrotate.d/odoo << EOF
-$ODOO_LOG_DIR/*.log {
-    daily
-    missingok
-    rotate 7
-    compress
-    delaycompress
-    notifempty
-    create 640 $ODOO_USER $ODOO_USER
-    sharedscripts
-    postrotate
-        systemctl reload odoo
-    endscript
-}
-EOF
+# Check if the service is running properly
+if systemctl is-active --quiet odoo.service; then
+    print_status "Odoo Enterprise is now installed and running!"
+    print_status "You can access Odoo at http://YOUR_SERVER_IP:8069"
+    print_status "Database name: $ODOO_DB"
+    print_status "Username: $ODOO_USER (email format)"
+else
+    print_error "Odoo service failed to start. Check logs for details: journalctl -u odoo.service"
+fi
 
-# Finalización
-log "Instalación de Odoo 18 completada"
-log "------------------------------------"
-log "Información de acceso:"
-log "URL: http://$(hostname -I | awk '{print $1}'):8069"
-log "Base de datos: Deberá crear una nueva en el primer acceso"
-log "Contraseña de administrador: $ODOO_SUPERADMIN"
-log "Usuario PostgreSQL: $PG_USER"
-log "Contraseña PostgreSQL: $PG_PASSWORD"
-warning "Guarde esta información en un lugar seguro!"
-log "Para ver los logs: tail -f $ODOO_LOG_DIR/odoo.log"
-log "Para reiniciar Odoo: systemctl restart odoo"
+# Security recommendations
+print_warning "SECURITY RECOMMENDATIONS:"
+print_warning "1. Set up Nginx or Apache as a reverse proxy with SSL"
+print_warning "2. Change default ports in the configuration file"
+print_warning "3. Set up proper backup solutions for your database"
+
+# Cleanup
+print_status "Cleaning up..."
+rm -f /tmp/wkhtmltox.deb
+
+print_status "Installation complete! Thank you for using this script."
